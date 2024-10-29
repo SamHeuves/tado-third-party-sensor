@@ -1,0 +1,75 @@
+blueprint:
+  name: Tado third party sensor
+  description: Use tado valves with third party temperature sensors
+  domain: automation
+  input:
+    sensor_to_monitor:
+      name: Sensor to use
+      description: The sensor whose state will be used to update the "offset" attribute
+      selector:
+        entity:
+          domain: sensor
+          device_class: temperature
+    entity_to_update:
+      name: Tado to update
+      description: The entity whose "offset" attribute will be updated
+      selector:
+        entity:
+            domain: climate
+    threshold:
+      name: Threshold
+      description: The maximum difference between the two sensors to trigger the automation
+      selector:
+        number:
+          min: 0.1
+          max: 1
+          step: 0.1
+          unit_of_measurement: "°C"
+      default: 0.5
+          
+variables:
+  entity_to_update: !input entity_to_update
+  sensor_to_monitor: !input sensor_to_monitor
+  threshold: !input threshold
+  actual_temp: "{{ states(sensor_to_monitor) | float }}"
+  tado_temp: "{{ state_attr(entity_to_update, 'current_temperature') | float }}"
+  current_offset: "{{ state_attr(entity_to_update, 'offset_celsius') }}"
+  offset: "{{ ( actual_temp - tado_temp )|round(1) }}"
+
+trigger:
+- platform: state
+  entity_id: !input entity_to_update
+  attribute: current_temperature
+- platform: state
+  entity_id: !input sensor_to_monitor 
+
+condition:
+- condition: template
+  value_template: "{{ offset != 0 }}"
+- condition: template
+  value_template: "{{ actual_temp != 0 }}"
+
+
+action:
+- if:
+    - condition: template
+      value_template: >
+          {{ (calculated_offset - current_offset)|round(1) > threshold or (calculated_offset - current_offset)|round(1) < (-1 * threshold)}}
+  then:
+    - service: tado.set_climate_temperature_offset
+      data:
+        offset: "{{ calculated_offset }}"
+        entity_id: "{{ entity_to_update }}"
+    - service: system_log.write
+      data:
+        message: >
+            Setting offset to {{ calculated_offset }}.
+        level: debug
+        logger: blueprints.tado.offset
+  else:
+    - service: system_log.write
+      data:
+        message: >
+            Offset is ({{ (calculated_offset - current_offset)|round(1) }}) is between threshold of {{ (-1 * threshold) }} and {{ threshold }}.
+        level: debug
+        logger: blueprints.tado.offset
