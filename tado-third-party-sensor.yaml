@@ -35,6 +35,7 @@ variables:
   tado_temp: "{{ state_attr(entity_to_update, 'current_temperature') | float }}"
   current_offset: "{{ state_attr(entity_to_update, 'offset_celsius') }}"
   offset: "{{ ( actual_temp - tado_temp )|round(1) }}"
+  calculated_offset: "{{ ( ( actual_temp - tado_temp ) + current_offset )|round(1) }}"
 
 trigger:
 - platform: state
