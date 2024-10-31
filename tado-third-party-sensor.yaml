@@ -8,69 +8,85 @@ blueprint:
       description: The sensor whose state will be used to update the "offset" attribute
       selector:
         entity:
-          domain: sensor
-          device_class: temperature
+          domain:
+          - sensor
+          device_class:
+          - temperature
+          multiple: false
     entity_to_update:
       name: Tado to update
       description: The entity whose "offset" attribute will be updated
       selector:
         entity:
-            domain: climate
+          domain:
+          - climate
+          multiple: false
+    homekit_climate_to_read:
+      name: Homekit climate entity to read
+      description: Because of the delay in Tado, import your climate entity through Homekit for fast response
+      selector:
+        entity:
+          domain:
+          - climate
+          multiple: false
     threshold:
       name: Threshold
       description: The maximum difference between the two sensors to trigger the automation
       selector:
         number:
           min: 0.1
-          max: 1
+          max: 1.0
           step: 0.1
-          unit_of_measurement: "°C"
+          unit_of_measurement: °C
+          mode: slider
       default: 0.5
-          
+  source_url: https://github.com/SamHeuves/tado-third-party-sensor/blob/main/tado-third-party-sensor.yaml
 variables:
   entity_to_update: !input entity_to_update
   sensor_to_monitor: !input sensor_to_monitor
+  homekit_climate_to_read: !input homekit_climate_to_read
   threshold: !input threshold
-  actual_temp: "{{ states(sensor_to_monitor) | float }}"
-  tado_temp: "{{ state_attr(entity_to_update, 'current_temperature') | float }}"
-  current_offset: "{{ state_attr(entity_to_update, 'offset_celsius') }}"
-  offset: "{{ ( actual_temp - tado_temp )|round(1) }}"
-  calculated_offset: "{{ ( ( actual_temp - tado_temp ) + current_offset )|round(1) }}"
-
+  homekit_climate_status: '{{ states(homekit_climate_to_read) }}'
+  actual_temp: '{{ states(sensor_to_monitor) | float }}'
+  tado_temp: '{{ state_attr(entity_to_update, ''current_temperature'') | float }}'
+  current_offset: '{{ state_attr(entity_to_update, ''offset_celsius'') }}'
+  offset: '{{ ( actual_temp - tado_temp )|round(1) }}'
+  calculated_offset: '{{ ( ( actual_temp - tado_temp ) + current_offset )|round(1) }}'
 trigger:
 - platform: state
   entity_id: !input entity_to_update
   attribute: current_temperature
 - platform: state
-  entity_id: !input sensor_to_monitor 
-
+  entity_id: !input sensor_to_monitor
 condition:
 - condition: template
-  value_template: "{{ offset != 0 }}"
+  value_template: '{{ offset != 0 }}'
 - condition: template
-  value_template: "{{ actual_temp != 0 }}"
-
-
+  value_template: '{{ actual_temp != 0 }}'
 action:
 - if:
-    - condition: template
-      value_template: >
-          {{ (calculated_offset - current_offset)|round(1) > threshold or (calculated_offset - current_offset)|round(1) < (-1 * threshold)}}
+    - condition: and
+      conditions:
+        - condition: template
+          value_template: >-
+              {{ (calculated_offset - current_offset)|round(1) > threshold or
+              (calculated_offset - current_offset)|round(1) < (-1 * threshold)}}
+        - condition: template
+          value_template: >- 
+              {{ homekit_climate_status == 'heat' }}
   then:
-    - service: tado.set_climate_temperature_offset
-      data:
-        offset: "{{ calculated_offset }}"
-        entity_id: "{{ entity_to_update }}"
-    - service: system_log.write
-      data:
-        message: >
-            Setting offset to {{ calculated_offset }}.
-        level: debug
-        logger: blueprints.tado.offset
+  - service: tado.set_climate_temperature_offset
+    data:
+      offset: '{{ calculated_offset }}'
+      entity_id: '{{ entity_to_update }}'
+  - service: system_log.write
+    data:
+      message: 'Setting offset to {{ calculated_offset }}.'
+      level: debug
+      logger: blueprints.tado.offset
   else:
-    - service: system_log.write
-      data:
-        message: >
-            Offset is ({{ (calculated_offset - current_offset)|round(1) }}) is between threshold of {{ (-1 * threshold) }} and {{ threshold }}.
-        level: debug
-        logger: blueprints.tado.offset
+  - service: system_log.write
+    data:
+      message: 'Offset is ({{ (calculated_offset - current_offset)|round(1) }}) is between threshold of {{ (-1 * threshold) }} and {{ threshold }}. {{ homekit_climate_to_read }}: {{ homekit_climate_status }}.'
+      level: debug
+      logger: blueprints.tado.offset
